@@ -10,6 +10,7 @@ color="\e[0;36m"
 color2="\e[0;32m"
 color3="\033[42m"
 color4="\033[41m"
+
 echo -e "${color2}welcome to the new vps installation script! \e[0m"
 echo -n -e "${color2}how many clients do you need? \e[0m"
 read clientnumber
