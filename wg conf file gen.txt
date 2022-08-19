@@ -1,0 +1,210 @@
+#!/bin/bash
+
+ 
+clientnum=2
+AllowedIPnum=$((clientnum+"1")) 
+serverIP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+network_interface=$(ip a | grep -o -P '(?<=2: ).*(?=:)')
+sec=5
+color="\e[0;36m"
+color2="\e[0;32m"
+color3="\033[42m"
+color4="\033[41m"
+echo -e "${color2}welcome to the new vps installation script! \e[0m"
+echo -n -e "${color2}how many clients do you need? \e[0m"
+read clientnumber
+leftclients=$(($clientnumber -"1"))
+echo -e "${color2}no problem let me do everything for you  \e[0m"
+echo " "
+echo -e "${color2}your ip is $serverIP \e[0m"
+echo " "
+echo -e "${color2}your network interface is $network_interface \e[0m"
+echo " "
+sleep 1
+
+
+echo -e "${color}upgrade the machine \e[0m"
+sudo apt update -y
+echo " "
+
+echo -e "${color}update the machine \e[0m"
+echo " "
+sudo apt upgrade -y
+echo " "
+
+echo -e "${color}enabale ipv4 forward \e[0m"
+echo " "
+sleep 1
+sudo sed -i 's/^#\(net.ipv4.ip_forward.*\)/\1/' /etc/sysctl.conf
+echo "done"
+echo " "
+
+echo -e "${color}downloading wireguard \e[0m"
+echo " "
+sudo apt install wireguard -y
+echo " "
+
+
+
+
+if [ $clientnumber > "0" ]; then 
+
+echo "
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = 51820
+PrivateKey = serverprivatekey
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o webinterface -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o webinterface -j MASQUERADE
+
+[Peer]
+PublicKey = clientpublickey
+AllowedIPs = 10.0.0.2/32" > /etc/wireguard/wg0.conf
+
+sed -i "s/webinterface/$network_interface/"  /etc/wireguard/wg0.conf
+
+#=====
+#gen server keys
+#=====
+
+mkdir  /etc/wireguard/server
+echo " "
+echo -e "${color}server public key: \e[0m"
+wg genkey | tee /etc/wireguard/server/private.key | wg pubkey | sudo tee /etc/wireguard/server/public.key
+sudo chmod go= /etc/wireguard/server/private.key
+serverprivatekey=$(cat /etc/wireguard/server/private.key)
+sed -i "s|serverprivatekey|${serverprivatekey}|"  /etc/wireguard/wg0.conf
+echo -e "${color}server private key: \e[0m"
+echo -e "$(cat /etc/wireguard/server/private.key)"
+
+#==================
+# client 1 config file 
+#==================
+
+echo -e "
+~~~~~~~~~~~~~~~~~~~
+${color3}client number 1 file \e[0m
+~~~~~~~~~~~~~~~~~~~ 
+
+[Interface]
+Address = 10.0.0.2/24
+ListenPort = 51820
+PrivateKey =  clientprivatekey1
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = serverpubkey
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = serverip:51820
+
+~~~~~~~~~~~~~~~~~~~ " > /etc/wireguard/conf_file
+
+#==================
+#gen client 1 keys 
+#==================
+echo " " 
+echo -e "${color}making client 1 \e[0m"
+echo " "
+echo -e "${color}public key client 1: \e[0m"
+wg genkey | tee /etc/wireguard/private.key | wg pubkey | sudo tee /etc/wireguard/public.key
+sudo chmod go= /etc/wireguard/private.key
+echo -e "${color}private key client 1: \e[0m"
+echo -e "$(cat /etc/wireguard/private.key)"
+
+clientpublickey=$(cat /etc/wireguard/public.key)
+sed -i "s|clientpublickey|${clientpublickey}|"  /etc/wireguard/wg0.conf
+
+clientprivatekey1=$(cat /etc/wireguard/private.key)
+sed -i "s|clientprivatekey1|${clientprivatekey1}|"  /etc/wireguard/conf_file
+
+serverpubkey=$(cat /etc/wireguard/server/public.key)
+sed -i "s|serverpubkey|${serverpubkey}|"  /etc/wireguard/conf_file
+
+sed -i "s/serverip/$serverIP/" /etc/wireguard/conf_file
+
+cat /etc/wireguard/conf_file
+
+#=====
+#if need more than 1 client 
+#=====
+if [ $leftclients > "0" ]; then     
+echo " "
+echo -e "${color}making another $leftclients clients \e[0m"
+echo " "
+echo "~~~~~~~~~~~~~~~~~~~"
+echo " "
+while [ $leftclients -ge "1" ]; do
+echo -e "${color}making client  $clientnum \e[0m"
+echo " "
+
+#=====
+#adding another peer for the server wg0
+#=====
+
+echo "
+[Peer]
+PublicKey = clientpublickey
+AllowedIPs = 10.0.0.AllowedIPnum/32"  >> /etc/wireguard/wg0.conf
+
+sed -i "s/AllowedIPnum/${AllowedIPnum}/"  /etc/wireguard/wg0.conf
+
+
+#=====
+#adding another client config file
+#=====
+echo -e "
+~~~~~~~~~~~~~~~~~~~
+${color3}client number $clientnum file \e[0m 
+~~~~~~~~~~~~~~~~~~~
+
+[Interface]
+Address = 10.0.0.AllowedIPnum/24
+ListenPort = 51820
+PrivateKey =  clientprivatekey2
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = serverpubkey
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = serverip:51820
+
+~~~~~~~~~~~~~~~~~~~
+" > /etc/wireguard/conf_file
+
+#=====
+#gen client $leftclients keys
+#=====
+serverpubkey=$(cat /etc/wireguard/server/public.key)
+sed -i "s|serverpubkey|${serverpubkey}|"  /etc/wireguard/conf_file
+
+echo -e "${color}public key client $clientnum: \e[0m"
+wg genkey | tee /etc/wireguard/private.key | wg pubkey | sudo tee /etc/wireguard/public.key
+sudo chmod go= /etc/wireguard/private.key
+clientpublickey=$(cat /etc/wireguard/public.key)
+sed -i "s|clientpublickey|${clientpublickey}|"  /etc/wireguard/wg0.conf
+echo -e "${color}private key client $clientnum: \e[0m"
+echo -e "$(cat /etc/wireguard/private.key) \e[0m"
+
+clientprivatekey2=$(cat /etc/wireguard/private.key)
+sed -i "s|clientprivatekey2|${clientprivatekey2}|"  /etc/wireguard/conf_file           
+sed -i "s/serverip/$serverIP/" /etc/wireguard/conf_file
+sed -i "s/AllowedIPnum/${AllowedIPnum}/"  /etc/wireguard/conf_file
+cat /etc/wireguard/conf_file
+
+AllowedIPnum=$((AllowedIPnum+"1")) 
+leftclients=$(($leftclients-"1")) 
+clientnum=$(($clientnum+"1"))
+
+done
+fi 
+
+rm /etc/wireguard/conf_file
+rm /etc/wireguard/public.key
+rm /etc/wireguard/private.key
+fi
+
+wg-quick up wg0
+ip a
+echo " "
+echo " "
+echo -e "${color4}please check that the wg0 interface is up before and after the reboot!  \e[0m"
